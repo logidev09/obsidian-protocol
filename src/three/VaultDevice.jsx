@@ -1,82 +1,50 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Edges } from '@react-three/drei'
-import DragOrbit from './DragOrbit'
 import Rig from './Rig'
-import { PALETTE, damp } from './palette'
+import DragOrbit from './DragOrbit'
+import { damp, PALETTE } from './palette'
 
 const LAYERS = [
-  {
-    id: 'shell',
-    label: 'Titanium shell',
-    size: [2.5, 1.42, 0.2],
-    y: 0,
-    open: [0, 0, 0.62],
-    color: PALETTE.surfaceLight,
-    accent: PALETTE.edge
-  },
-  {
-    id: 'board',
-    label: 'Logic board',
-    size: [2.26, 1.2, 0.1],
-    y: 0,
-    open: [0, 0, 0.14],
-    color: '#1b2a2a',
-    accent: PALETTE.accentDim
-  },
-  {
-    id: 'element',
-    label: 'Secure element',
-    size: [0.72, 0.72, 0.14],
-    y: 0,
-    open: [0, 0, -0.34],
-    color: PALETTE.surface,
-    accent: PALETTE.accent
-  },
-  {
-    id: 'back',
-    label: 'Tamper mesh',
-    size: [2.5, 1.42, 0.16],
-    y: 0,
-    open: [0, 0, -0.86],
-    color: '#171d26',
-    accent: PALETTE.violet
-  }
+  { id: 'shell', label: 'Titanium shell', y: 0.62, color: PALETTE.surfaceLight, h: 0.16 },
+  { id: 'secure', label: 'Secure element', y: 0.28, color: PALETTE.accentDim, h: 0.2 },
+  { id: 'logic', label: 'Signing logic', y: -0.08, color: PALETTE.surface, h: 0.2 },
+  { id: 'power', label: 'Air-gap power', y: -0.44, color: PALETTE.surfaceLight, h: 0.16 }
 ]
 
-function Layer({ data, open, active, onHover, onLeave }) {
+function Layer({ layer, index, exploded, active, onHover, onLeave }) {
   const ref = useRef(null)
 
   useFrame((three, dt) => {
     const m = ref.current
     if (!m) return
     const step = Math.min(dt, 0.05)
-    const [ox, oy, oz] = open ? data.open : [0, 0, 0]
-    m.position.x = damp(m.position.x, ox, 5, step)
-    m.position.y = damp(m.position.y, data.y + oy, 5, step)
-    m.position.z = damp(m.position.z, oz, 5, step)
-    const lift = active ? 1.04 : 1
-    m.scale.setScalar(damp(m.scale.x || 1, lift, 8, step))
+    const spread = exploded ? 1 : 0
+    const targetY = layer.y + spread * index * 0.3
+    const targetScale = active ? 1.06 : 1
+    m.position.y = damp(m.position.y, targetY, 7, step)
+    m.scale.x = damp(m.scale.x, targetScale, 8, step)
+    m.scale.z = damp(m.scale.z, targetScale, 8, step)
   })
 
   return (
     <mesh
       ref={ref}
+      position={[0, layer.y, 0]}
       onPointerOver={(e) => {
         e.stopPropagation()
-        onHover(data.id)
+        onHover(layer.id)
       }}
       onPointerOut={onLeave}
     >
-      <boxGeometry args={data.size} />
+      <boxGeometry args={[1.15, layer.h, 1.15]} />
       <meshStandardMaterial
-        color={data.color}
-        emissive={active ? data.accent : '#000000'}
-        emissiveIntensity={active ? 0.42 : 0}
-        metalness={0.78}
+        color={layer.color}
+        emissive={active ? PALETTE.accent : PALETTE.accentDim}
+        emissiveIntensity={active ? 0.75 : 0.14}
+        metalness={0.8}
         roughness={0.34}
+        flatShading
       />
-      <Edges threshold={12} color={active ? data.accent : PALETTE.edge} />
     </mesh>
   )
 }
@@ -84,60 +52,82 @@ function Layer({ data, open, active, onHover, onLeave }) {
 function Screen({ active }) {
   const ref = useRef(null)
 
-  useFrame((three) => {
-    if (!ref.current) return
+  useFrame((three, dt) => {
+    const m = ref.current
+    if (!m) return
     const t = three.clock.elapsedTime
-    ref.current.material.opacity = 0.5 + Math.sin(t * 2.1) * 0.1 + (active ? 0.2 : 0)
+    m.material.emissiveIntensity = damp(
+      m.material.emissiveIntensity,
+      active ? 2.1 : 0.9 + Math.sin(t * 2) * 0.12,
+      6,
+      Math.min(dt, 0.05)
+    )
   })
 
   return (
-    <mesh ref={ref} position={[0, 0.16, 0.115]}>
-      <planeGeometry args={[1.52, 0.62]} />
-      <meshBasicMaterial color={PALETTE.accent} transparent opacity={0.5} />
+    <mesh ref={ref} position={[0, 0.28, 0.585]}>
+      <planeGeometry args={[0.78, 0.13]} />
+      <meshStandardMaterial color={PALETTE.accent} emissive={PALETTE.accent} emissiveIntensity={1} />
     </mesh>
   )
 }
 
-/**
- * Scene produk: perangkat vault low-poly.
- * Drag = putar, hover layer = highlight, klik = tampilan exploded.
- */
+/** Perangkat vault: drag untuk memutar, klik untuk membongkar lapisannya. */
 export default function VaultDevice({ onLayerChange }) {
-  const [open, setOpen] = useState(false)
+  const [exploded, setExploded] = useState(false)
   const [active, setActive] = useState(null)
+  const ring = useRef(null)
 
-  const setHover = (id) => {
-    setActive(id)
-    onLayerChange?.(LAYERS.find((l) => l.id === id) || null)
-  }
+  const handleHover = useMemo(
+    () => (id) => {
+      setActive(id)
+      if (onLayerChange) onLayerChange(LAYERS.find((l) => l.id === id) || null)
+    },
+    [onLayerChange]
+  )
 
-  const clearHover = () => {
-    setActive(null)
-    onLayerChange?.(null)
-  }
+  const handleLeave = useMemo(
+    () => () => {
+      setActive(null)
+      if (onLayerChange) onLayerChange(null)
+    },
+    [onLayerChange]
+  )
+
+  useFrame((three, dt) => {
+    if (ring.current) ring.current.rotation.z += dt * 0.22
+  })
 
   return (
     <>
-      <fog attach="fog" args={[PALETTE.fog, 6, 17]} />
-      <Rig intensity={1.08} />
-      <DragOrbit autoSpin={0.16} maxPitch={0.7}>
+      <fog attach="fog" args={[PALETTE.fog, 5, 15]} />
+      <Rig intensity={1.05} />
+
+      <DragOrbit autoSpin={0.1} maxPitch={0.5}>
         <group
           onClick={(e) => {
             e.stopPropagation()
-            setOpen((v) => !v)
+            setExploded((v) => !v)
           }}
         >
-          {LAYERS.map((data) => (
+          {LAYERS.map((layer, i) => (
             <Layer
-              key={data.id}
-              data={data}
-              open={open}
-              active={active === data.id}
-              onHover={setHover}
-              onLeave={clearHover}
+              key={layer.id}
+              layer={layer}
+              index={i}
+              exploded={exploded}
+              active={active === layer.id}
+              onHover={handleHover}
+              onLeave={handleLeave}
             />
           ))}
-          <Screen active={active === 'shell'} />
+
+          <Screen active={active === 'secure'} />
+
+          <mesh ref={ring} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.9, 0]}>
+            <torusGeometry args={[1.25, 0.008, 3, 72]} />
+            <meshBasicMaterial color={PALETTE.amber} transparent opacity={0.5} />
+          </mesh>
         </group>
       </DragOrbit>
     </>
