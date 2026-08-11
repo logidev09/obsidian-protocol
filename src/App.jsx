@@ -6,6 +6,8 @@ import HeroCrystal from './three/HeroCrystal'
 import LedgerGrid from './three/LedgerGrid'
 import NetworkMesh from './three/NetworkMesh'
 import VaultDevice from './three/VaultDevice'
+import { AuthProvider } from './auth/AuthProvider'
+import ConnectButton from './auth/ConnectButton'
 
 const NAV = [
   { label: 'Protocol', href: '#protocol' },
@@ -28,9 +30,7 @@ function Header() {
             </a>
           ))}
         </nav>
-        <a className="btn btn--primary btn--sm" href="#protocol">
-          Get access
-        </a>
+        <ConnectButton chain="ethereum" />
       </div>
     </header>
   )
@@ -205,18 +205,20 @@ export default function App() {
   }, [])
 
   return (
-    <div className="shell">
-      <div className="ambient" aria-hidden="true" />
-      <div className="noise" aria-hidden="true" />
-      <Header />
-      <main>
-        <Hero scrollRef={scrollRef} />
-        <hr className="rule" />
-        <Protocol />
-        <Network />
-        <Vault />
-      </main>
-      <Footer />
-    </div>
+    <AuthProvider>
+      <div className="shell">
+        <div className="ambient" aria-hidden="true" />
+        <div className="noise" aria-hidden="true" />
+        <Header />
+        <main>
+          <Hero scrollRef={scrollRef} />
+          <hr className="rule" />
+          <Protocol />
+          <Network />
+          <Vault />
+        </main>
+        <Footer />
+      </div>
+    </AuthProvider>
   )
 }
