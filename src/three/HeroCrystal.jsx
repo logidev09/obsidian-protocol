@@ -4,155 +4,160 @@ import * as THREE from 'three'
 import Rig from './Rig'
 import Motes from './Motes'
 import DragOrbit from './DragOrbit'
-import { damp, LOW_END, PALETTE, PREFERS_REDUCED } from './palette'
+import { clamp, damp, LOW_END, PALETTE } from './palette'
 
-const SHARD_COUNT = LOW_END ? 7 : 11
-
-function Shard({ index, total, active }) {
+/** Cangkang icosahedron yang "membuka" saat pointer mendekat. */
+function Shell({ hovered }) {
   const ref = useRef(null)
-  const [hot, setHot] = useState(false)
 
-  const config = useMemo(() => {
-    const angle = (index / total) * Math.PI * 2
-    const radius = 1.55 + (index % 3) * 0.22
-    return {
-      angle,
-      radius,
-      y: ((index % 5) - 2) * 0.34,
-      size: 0.16 + ((index * 7) % 5) * 0.035,
-      speed: 0.16 + (index % 4) * 0.045,
-      tilt: (index % 6) * 0.4
-    }
-  }, [index, total])
+  useFrame((three, dt) => {
+    const mesh = ref.current
+    if (!mesh) return
+    const step = Math.min(dt, 0.05)
+    const target = hovered ? 1.28 : 1
+    const s = damp(mesh.scale.x, target, 5, step)
+    mesh.scale.setScalar(s)
+    mesh.material.opacity = damp(mesh.material.opacity, hovered ? 0.16 : 0.4, 5, step)
+    mesh.rotation.y += step * 0.12
+    mesh.rotation.x -= step * 0.05
+  })
+
+  return (
+    <mesh ref={ref}>
+      <icosahedronGeometry args={[1.55, 1]} />
+      <meshStandardMaterial
+        color={PALETTE.surface}
+        emissive={PALETTE.edge}
+        emissiveIntensity={0.35}
+        metalness={0.85}
+        roughness={0.28}
+        transparent
+        opacity={0.4}
+        flatShading
+        wireframe
+      />
+    </mesh>
+  )
+}
+
+/** Inti kristal: bereaksi pada hover dan berdenyut halus. */
+function Core({ hovered }) {
+  const ref = useRef(null)
 
   useFrame((three, dt) => {
     const mesh = ref.current
     if (!mesh) return
     const step = Math.min(dt, 0.05)
     const t = three.clock.elapsedTime
+    const pulse = 1 + Math.sin(t * 1.25) * 0.035
 
-    const spread = active ? 1.32 : 1
-    const angle = config.angle + (PREFERS_REDUCED ? 0 : t * config.speed)
-
-    mesh.position.x = damp(mesh.position.x, Math.cos(angle) * config.radius * spread, 3, step)
-    mesh.position.z = damp(mesh.position.z, Math.sin(angle) * config.radius * spread, 3, step)
-    mesh.position.y = damp(mesh.position.y, config.y + Math.sin(t * 0.6 + config.tilt) * 0.12, 3, step)
-
-    mesh.rotation.x += step * 0.35
-    mesh.rotation.y += step * 0.22
-
-    const targetScale = hot ? config.size * 1.55 : config.size
-    const s = damp(mesh.scale.x, targetScale, 8, step)
-    mesh.scale.setScalar(s)
-
-    mesh.material.emissiveIntensity = damp(mesh.material.emissiveIntensity, hot ? 2.1 : 0.55, 6, step)
+    mesh.rotation.y += step * (hovered ? 0.55 : 0.22)
+    mesh.rotation.z = Math.sin(t * 0.4) * 0.12
+    mesh.scale.setScalar(damp(mesh.scale.x, pulse * (hovered ? 1.08 : 1), 6, step))
+    mesh.material.emissiveIntensity = damp(
+      mesh.material.emissiveIntensity,
+      hovered ? 1.5 : 0.75,
+      5,
+      step
+    )
   })
 
   return (
-    <mesh
-      ref={ref}
-      onPointerOver={(e) => {
-        e.stopPropagation()
-        setHot(true)
-      }}
-      onPointerOut={() => setHot(false)}
-    >
-      <tetrahedronGeometry args={[1, 0]} />
+    <mesh ref={ref} castShadow>
+      <octahedronGeometry args={[0.95, 0]} />
       <meshStandardMaterial
         color={PALETTE.surfaceLight}
-        emissive={index % 4 === 0 ? PALETTE.amber : PALETTE.accent}
-        emissiveIntensity={0.55}
-        metalness={0.72}
-        roughness={0.26}
+        emissive={PALETTE.accent}
+        emissiveIntensity={0.75}
+        metalness={0.92}
+        roughness={0.16}
         flatShading
       />
     </mesh>
   )
 }
 
-function Core({ active }) {
-  const outer = useRef(null)
-  const inner = useRef(null)
+/** Cincin orbit tetrahedron di sekeliling inti. */
+function Orbit({ radius, speed, tilt, count, color }) {
+  const ref = useRef(null)
+  const dummy = useMemo(() => new THREE.Object3D(), [])
 
   useFrame((three, dt) => {
-    const step = Math.min(dt, 0.05)
+    const mesh = ref.current
+    if (!mesh) return
     const t = three.clock.elapsedTime
-
-    if (outer.current) {
-      outer.current.rotation.y += step * 0.18
-      outer.current.rotation.x = Math.sin(t * 0.3) * 0.12
-      const s = damp(outer.current.scale.x, active ? 1.08 : 1, 5, step)
-      outer.current.scale.setScalar(s)
+    for (let i = 0; i < count; i += 1) {
+      const a = (i / count) * Math.PI * 2 + t * speed
+      dummy.position.set(Math.cos(a) * radius, Math.sin(a * 2) * 0.18, Math.sin(a) * radius)
+      dummy.rotation.set(a * 1.4, a, 0)
+      dummy.scale.setScalar(0.1 + (i % 3) * 0.028)
+      dummy.updateMatrix()
+      mesh.setMatrixAt(i, dummy.matrix)
     }
-
-    if (inner.current) {
-      inner.current.rotation.y -= step * 0.4
-      inner.current.rotation.z += step * 0.15
-      inner.current.material.emissiveIntensity = damp(
-        inner.current.material.emissiveIntensity,
-        active ? 2.6 : 1.35,
-        5,
-        step
-      )
-    }
+    mesh.instanceMatrix.needsUpdate = true
   })
 
   return (
-    <group>
-      <mesh ref={outer}>
-        <icosahedronGeometry args={[1.02, 0]} />
+    <group rotation={tilt}>
+      <instancedMesh ref={ref} args={[undefined, undefined, count]}>
+        <tetrahedronGeometry args={[1, 0]} />
         <meshStandardMaterial
-          color={PALETTE.surface}
-          metalness={0.86}
-          roughness={0.22}
-          flatShading
-          transparent
-          opacity={0.94}
-        />
-      </mesh>
-
-      <mesh ref={outer === null ? undefined : undefined} scale={1.035}>
-        <icosahedronGeometry args={[1.02, 0]} />
-        <meshBasicMaterial color={PALETTE.edge} wireframe transparent opacity={0.28} />
-      </mesh>
-
-      <mesh ref={inner} scale={0.52}>
-        <octahedronGeometry args={[1, 0]} />
-        <meshStandardMaterial
-          color="#0d1116"
-          emissive={PALETTE.accent}
-          emissiveIntensity={1.35}
-          metalness={0.4}
+          color={PALETTE.surfaceLight}
+          emissive={color}
+          emissiveIntensity={1.1}
+          metalness={0.7}
           roughness={0.3}
           flatShading
           toneMapped={false}
         />
+      </instancedMesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[radius - 0.006, radius + 0.006, 96]} />
+        <meshBasicMaterial color={color} transparent opacity={0.16} side={THREE.DoubleSide} />
       </mesh>
     </group>
   )
 }
 
-export default function HeroCrystal() {
-  const [active, setActive] = useState(false)
+/**
+ * Scene hero: drag untuk memutar, hover untuk membuka cangkang.
+ * Rotasi juga sedikit mengikuti progres scroll supaya terasa menyatu.
+ */
+export default function HeroCrystal({ scrollRef }) {
+  const group = useRef(null)
+  const [hovered, setHovered] = useState(false)
+
+  useFrame((three, dt) => {
+    const g = group.current
+    if (!g) return
+    const step = Math.min(dt, 0.05)
+    const progress = scrollRef?.current ?? 0
+    g.position.y = damp(g.position.y, clamp(-progress * 1.6, -1.6, 0), 3, step)
+    g.rotation.x = damp(g.rotation.x, progress * 0.35, 3, step)
+  })
 
   return (
     <>
-      <fog attach="fog" args={[PALETTE.fog, 5.5, 17]} />
+      <fog attach="fog" args={[PALETTE.fog, 5, 16]} />
       <Rig />
 
-      <DragOrbit autoSpin={0.14} maxPitch={0.6}>
+      <DragOrbit autoSpin={0.1} maxPitch={0.55}>
         <group
-          onPointerOver={() => setActive(true)}
-          onPointerOut={() => setActive(false)}
+          ref={group}
+          onPointerOver={(e) => {
+            e.stopPropagation()
+            setHovered(true)
+          }}
+          onPointerOut={() => setHovered(false)}
         >
-          <Core active={active} />
-          {Array.from({ length: SHARD_COUNT }).map((_, i) => (
-            <Shard key={i} index={i} total={SHARD_COUNT} active={active} />
-          ))}
+          <Core hovered={hovered} />
+          <Shell hovered={hovered} />
+          <Orbit radius={2.1} speed={0.36} tilt={[0.35, 0, 0.18]} count={LOW_END ? 8 : 14} color={PALETTE.accent} />
+          <Orbit radius={2.75} speed={-0.24} tilt={[-0.5, 0.3, -0.2]} count={LOW_END ? 6 : 10} color={PALETTE.amber} />
         </group>
       </DragOrbit>
 
-      <Motes count={LOW_END ? 90 : 190} radius={7} />
+      <Motes count={LOW_END ? 40 : 90} radius={6} />
     </>
   )
 }
