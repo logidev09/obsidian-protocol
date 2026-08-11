@@ -1,20 +1,19 @@
 import { useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import * as THREE from 'three'
 import { damp, clamp, PREFERS_REDUCED } from './palette'
 
 /**
- * Rotasi objek via drag pointer, dengan inersia dan auto-spin saat idle.
- * Sengaja TIDAK memakai OrbitControls: pointer wheel harus tetap milik page
- * supaya scroll tidak "terjebak" di dalam canvas.
+ * Rotasi objek via drag pointer + inersia + auto-spin saat idle.
+ * Sengaja TIDAK memakai OrbitControls: wheel/scroll harus tetap milik halaman,
+ * jadi canvas tidak pernah "menelan" scroll user.
  */
 export default function DragOrbit({
   children,
-  autoSpin = 0.14,
+  autoSpin = 0.12,
   damping = 4.2,
-  maxPitch = 0.62,
-  sensitivity = 0.0075,
-  followPointer = 0.18
+  maxPitch = 0.6,
+  sensitivity = 0.0072,
+  followPointer = 0.22
 }) {
   const group = useRef(null)
   const state = useRef({
@@ -42,7 +41,6 @@ export default function DragOrbit({
       s.velX = 0
       s.velY = 0
       dom.style.cursor = 'grabbing'
-      e.target.setPointerCapture?.(e.pointerId)
     }
 
     const move = (e) => {
@@ -57,18 +55,20 @@ export default function DragOrbit({
       s.velY = dy * sensitivity
     }
 
-    const up = (e) => {
+    const up = () => {
       s.dragging = false
       dom.style.cursor = 'grab'
-      e.target.releasePointerCapture?.(e.pointerId)
     }
 
     return {
       onPointerDown: down,
       onPointerMove: move,
       onPointerUp: up,
+      onPointerLeave: up,
       onPointerCancel: up,
-      onPointerOver: () => { dom.style.cursor = 'grab' },
+      onPointerOver: () => {
+        if (!s.dragging) dom.style.cursor = 'grab'
+      },
       onPointerOut: () => {
         if (!s.dragging) dom.style.cursor = 'auto'
       }
@@ -83,7 +83,6 @@ export default function DragOrbit({
     const step = Math.min(dt, 0.05)
 
     if (!s.dragging) {
-      // inersia setelah lepas drag
       s.targetYaw += s.velX
       s.targetPitch = clamp(s.targetPitch + s.velY, -maxPitch, maxPitch)
       s.velX *= 0.92
@@ -91,15 +90,13 @@ export default function DragOrbit({
 
       if (!PREFERS_REDUCED) s.targetYaw += autoSpin * step
 
-      // pointer di layar memberi sedikit parallax walau tidak drag
-      const px = three.pointer.x
-      const py = three.pointer.y
+      // parallax halus mengikuti pointer walau tidak sedang drag
       s.targetPitch = clamp(
-        s.targetPitch + (-py * followPointer - s.targetPitch) * 0.012,
+        s.targetPitch + (-three.pointer.y * followPointer - s.targetPitch) * 0.02,
         -maxPitch,
         maxPitch
       )
-      s.targetYaw += (px * followPointer * 0.4) * 0.012
+      s.targetYaw += three.pointer.x * followPointer * 0.012
     }
 
     s.yaw = damp(s.yaw, s.targetYaw, damping, step)
@@ -110,11 +107,11 @@ export default function DragOrbit({
   })
 
   return (
-    <group>
-      {/* plane transparan sebagai area tangkap pointer */}
-      <mesh {...handlers} visible={false} scale={40}>
+    <group {...handlers}>
+      {/* backdrop penangkap pointer, ditaruh di belakang semua objek */}
+      <mesh position={[0, 0, -7]} scale={44} visible={false}>
         <planeGeometry />
-        <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
+        <meshBasicMaterial transparent opacity={0} />
       </mesh>
       <group ref={group}>{children}</group>
     </group>
