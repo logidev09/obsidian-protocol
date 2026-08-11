@@ -2,27 +2,27 @@ import { useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import Rig from './Rig'
-import Motes from './Motes'
-import { damp, LOW_END, PALETTE } from './palette'
+import DragOrbit from './DragOrbit'
+import { clamp, damp, LOW_END, PALETTE } from './palette'
 
-const NODE_COUNT = LOW_END ? 20 : 30
-const LINK_DISTANCE = 2.2
+const NODE_COUNT = LOW_END ? 16 : 26
+const LINK_DISTANCE = 2.15
 
-function buildGraph() {
+function buildGraph(count) {
   const nodes = []
   const golden = Math.PI * (3 - Math.sqrt(5))
-  for (let i = 0; i < NODE_COUNT; i++) {
-    const y = 1 - (i / (NODE_COUNT - 1)) * 2
-    const r = Math.sqrt(Math.max(0, 1 - y * y))
+
+  for (let i = 0; i < count; i++) {
+    const y = 1 - (i / (count - 1)) * 2
+    const radius = Math.sqrt(Math.max(0, 1 - y * y))
     const theta = golden * i
-    const radius = 2.3 + ((i * 37) % 11) / 42
+    const scale = 2.5
     nodes.push({
-      base: new THREE.Vector3(Math.cos(theta) * r * radius, y * 1.8, Math.sin(theta) * r * radius),
-      current: new THREE.Vector3(),
-      tier: i % 3
+      base: new THREE.Vector3(Math.cos(theta) * radius * scale, y * scale * 0.78, Math.sin(theta) * radius * scale),
+      seed: i * 1.7,
+      validator: i % 5 === 0
     })
   }
-  nodes.forEach((n) => n.current.copy(n.base))
 
   const links = []
   for (let i = 0; i < nodes.length; i++) {
@@ -30,145 +30,121 @@ function buildGraph() {
       if (nodes[i].base.distanceTo(nodes[j].base) < LINK_DISTANCE) links.push([i, j])
     }
   }
+
   return { nodes, links }
 }
 
-/** Node polygon menjauh dari pointer; hover satu node menyalakan seluruh link miliknya. */
 export default function NetworkMesh() {
-  const { nodes, links } = useMemo(buildGraph, [])
-  const [hovered, setHovered] = useState(null)
+  const [hovered, setHovered] = useState(-1)
+  const { nodes, links } = useMemo(() => buildGraph(NODE_COUNT), [])
 
-  const meshRefs = useRef([])
-  const spinner = useRef(null)
-  const pointer = useRef(new THREE.Vector3(99, 99, 99))
-  const active = useRef(false)
+  const instances = useRef(null)
+  const lines = useRef(null)
+  const dummy = useMemo(() => new THREE.Object3D(), [])
+  const color = useMemo(() => new THREE.Color(), [])
+  const live = useMemo(() => nodes.map((n) => n.base.clone()), [nodes])
+
+  const linePositions = useMemo(() => new Float32Array(links.length * 6), [links.length])
 
   const lineGeometry = useMemo(() => {
     const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(links.length * 6), 3))
-    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(links.length * 6), 3))
+    g.setAttribute('position', new THREE.BufferAttribute(linePositions, 3))
     return g
-  }, [links.length])
-
-  const colors = useMemo(
-    () => ({ idle: new THREE.Color(PALETTE.edge), hot: new THREE.Color(PALETTE.accent) }),
-    []
-  )
+  }, [linePositions])
 
   useFrame((three, dt) => {
-    const step = Math.min(dt, 0.05)
     const t = three.clock.elapsedTime
-    if (spinner.current) spinner.current.rotation.y += step * 0.08
+    const step = Math.min(dt, 0.05)
+    const inst = instances.current
+    if (!inst) return
 
-    const p = pointer.current
+    const pointer = three.pointer
 
     nodes.forEach((node, i) => {
-      const target = node.current
-      let px = node.base.x
-      let py = node.base.y + Math.sin(t * 0.7 + i) * 0.05
-      let pz = node.base.z
+      const drift = new THREE.Vector3(
+        Math.sin(t * 0.5 + node.seed) * 0.09,
+        Math.cos(t * 0.42 + node.seed * 1.3) * 0.09,
+        Math.sin(t * 0.36 + node.seed * 0.7) * 0.09
+      )
 
-      if (active.current) {
-        const dx = node.base.x - p.x
-        const dy = node.base.y - p.y
-        const dz = node.base.z - p.z
-        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1
-        if (d < 2.6) {
-          const force = (1 - d / 2.6) * 0.85
-          px += (dx / d) * force
-          py += (dy / d) * force
-          pz += (dz / d) * force
-        }
-      }
+      const target = node.base.clone().add(drift)
+      target.x += pointer.x * 0.22
+      target.y += pointer.y * 0.22
 
-      target.x = damp(target.x, px, 4, step)
-      target.y = damp(target.y, py, 4, step)
-      target.z = damp(target.z, pz, 4, step)
+      live[i].x = damp(live[i].x, target.x, 3, step)
+      live[i].y = damp(live[i].y, target.y, 3, step)
+      live[i].z = damp(live[i].z, target.z, 3, step)
 
-      const m = meshRefs.current[i]
-      if (m) {
-        m.position.copy(target)
-        m.rotation.x += step * 0.4
-        m.rotation.y += step * 0.55
-        const scale = (hovered === i ? 1.8 : 1) * (0.09 + node.tier * 0.022)
-        m.scale.setScalar(damp(m.scale.x || scale, scale, 8, step))
-      }
+      const isHot = hovered === i
+      const base = node.validator ? 0.15 : 0.1
+      dummy.position.copy(live[i])
+      dummy.scale.setScalar(isHot ? base * 1.9 : base)
+      dummy.rotation.set(t * 0.3 + node.seed, t * 0.24, 0)
+      dummy.updateMatrix()
+      inst.setMatrixAt(i, dummy.matrix)
+
+      const c = node.validator ? PALETTE.amber : PALETTE.accent
+      color.set(isHot ? '#ffffff' : c)
+      inst.setColorAt(i, color)
     })
 
-    const pos = lineGeometry.attributes.position
-    const col = lineGeometry.attributes.color
-    links.forEach(([a, b], k) => {
-      const ix = k * 6
-      const A = nodes[a].current
-      const B = nodes[b].current
-      pos.array[ix] = A.x
-      pos.array[ix + 1] = A.y
-      pos.array[ix + 2] = A.z
-      pos.array[ix + 3] = B.x
-      pos.array[ix + 4] = B.y
-      pos.array[ix + 5] = B.z
+    inst.instanceMatrix.needsUpdate = true
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true
 
-      const c = hovered === a || hovered === b ? colors.hot : colors.idle
-      for (let o = 0; o < 6; o += 3) {
-        col.array[ix + o] = c.r
-        col.array[ix + o + 1] = c.g
-        col.array[ix + o + 2] = c.b
-      }
+    links.forEach(([a, b], i) => {
+      const o = i * 6
+      linePositions[o] = live[a].x
+      linePositions[o + 1] = live[a].y
+      linePositions[o + 2] = live[a].z
+      linePositions[o + 3] = live[b].x
+      linePositions[o + 4] = live[b].y
+      linePositions[o + 5] = live[b].z
     })
-    pos.needsUpdate = true
-    col.needsUpdate = true
+
+    lineGeometry.attributes.position.needsUpdate = true
+
+    if (lines.current) {
+      lines.current.material.opacity = damp(
+        lines.current.material.opacity,
+        hovered >= 0 ? 0.5 : 0.3,
+        5,
+        step
+      )
+    }
   })
 
   return (
     <>
       <fog attach="fog" args={[PALETTE.fog, 6, 18]} />
       <Rig intensity={0.95} />
-      <Motes count={LOW_END ? 60 : 140} radius={9} />
 
-      <mesh
-        scale={26}
-        visible={false}
-        onPointerMove={(e) => {
-          pointer.current.copy(e.point)
-          active.current = true
-        }}
-        onPointerLeave={() => {
-          active.current = false
-        }}
-      >
-        <planeGeometry />
-        <meshBasicMaterial transparent opacity={0} />
-      </mesh>
-
-      <group ref={spinner}>
-        <lineSegments geometry={lineGeometry}>
-          <lineBasicMaterial vertexColors transparent opacity={0.5} />
-        </lineSegments>
-
-        {nodes.map((node, i) => (
-          <mesh
-            key={i}
-            ref={(el) => {
-              meshRefs.current[i] = el
-            }}
-            onPointerOver={(e) => {
+      <DragOrbit autoSpin={0.12} maxPitch={0.7}>
+        <group>
+          <instancedMesh
+            ref={instances}
+            args={[undefined, undefined, nodes.length]}
+            onPointerMove={(e) => {
               e.stopPropagation()
-              setHovered(i)
+              setHovered(clamp(e.instanceId ?? -1, -1, nodes.length - 1))
             }}
-            onPointerOut={() => setHovered((h) => (h === i ? null : h))}
+            onPointerOut={() => setHovered(-1)}
           >
             <octahedronGeometry args={[1, 0]} />
             <meshStandardMaterial
-              color={hovered === i ? PALETTE.accent : PALETTE.surfaceLight}
-              emissive={hovered === i ? PALETTE.accent : PALETTE.accentDim}
-              emissiveIntensity={hovered === i ? 1.1 : 0.28}
-              metalness={0.6}
-              roughness={0.35}
+              emissive={PALETTE.accent}
+              emissiveIntensity={0.85}
+              metalness={0.5}
+              roughness={0.28}
               flatShading
+              toneMapped={false}
             />
-          </mesh>
-        ))}
-      </group>
+          </instancedMesh>
+
+          <lineSegments ref={lines} geometry={lineGeometry}>
+            <lineBasicMaterial color={PALETTE.edge} transparent opacity={0.3} />
+          </lineSegments>
+        </group>
+      </DragOrbit>
     </>
   )
 }

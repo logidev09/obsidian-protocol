@@ -4,94 +4,74 @@ import * as THREE from 'three'
 import Rig from './Rig'
 import { LOW_END, PALETTE, PREFERS_REDUCED } from './palette'
 
-const COLS = LOW_END ? 16 : 22
-const ROWS = LOW_END ? 16 : 22
-const GAP = 0.26
-const TOTAL = COLS * ROWS
+const COLS = LOW_END ? 12 : 18
+const ROWS = LOW_END ? 12 : 18
+const GAP = 0.34
 
-/** Grid batang instanced: tinggi & warnanya bereaksi ke jarak pointer. */
+/** Grid ledger: tiap kolom naik saat pointer mendekat, seperti gelombang blok. */
 export default function LedgerGrid() {
   const mesh = useRef(null)
-  const pointer = useRef(new THREE.Vector3(99, 0, 99))
-  const strength = useRef(0)
-
   const dummy = useMemo(() => new THREE.Object3D(), [])
-  const colorA = useMemo(() => new THREE.Color(PALETTE.surface), [])
-  const colorB = useMemo(() => new THREE.Color(PALETTE.accent), [])
-  const tmp = useMemo(() => new THREE.Color(), [])
+  const color = useMemo(() => new THREE.Color(), [])
+  const pointerWorld = useRef(new THREE.Vector3(0, 0, 0))
 
   const cells = useMemo(() => {
     const list = []
     for (let x = 0; x < COLS; x++) {
       for (let z = 0; z < ROWS; z++) {
-        list.push({ x: (x - (COLS - 1) / 2) * GAP, z: (z - (ROWS - 1) / 2) * GAP })
+        list.push({
+          x: (x - (COLS - 1) / 2) * GAP,
+          z: (z - (ROWS - 1) / 2) * GAP,
+          seed: (x * 31 + z * 17) % 100
+        })
       }
     }
     return list
   }, [])
 
   useFrame((three, dt) => {
-    const m = mesh.current
-    if (!m) return
+    const inst = mesh.current
+    if (!inst) return
 
-    const t = PREFERS_REDUCED ? 0 : three.clock.elapsedTime
-    const p = pointer.current
-    strength.current += (0 - strength.current) * dt * 0.55
+    const t = three.clock.elapsedTime
+    const reach = 2.1
 
-    for (let i = 0; i < TOTAL; i++) {
-      const c = cells[i]
-      const wave = Math.sin(c.x * 1.6 + t * 0.9) * Math.cos(c.z * 1.4 - t * 0.7)
-      const dist = Math.hypot(c.x - p.x, c.z - p.z)
-      const pulse = Math.max(0, 1 - dist / 1.9) * strength.current
-      const height = 0.14 + Math.abs(wave) * 0.32 + pulse * 1.45
+    pointerWorld.current.set(three.pointer.x * 3.1, 0, -three.pointer.y * 2.4)
 
-      dummy.position.set(c.x, height / 2, c.z)
-      dummy.scale.set(0.16, height, 0.16)
-      dummy.rotation.y = pulse * 0.6
+    cells.forEach((cell, i) => {
+      const dx = cell.x - pointerWorld.current.x
+      const dz = cell.z - pointerWorld.current.z
+      const dist = Math.sqrt(dx * dx + dz * dz)
+      const falloff = Math.max(0, 1 - dist / reach)
+      const wave = PREFERS_REDUCED ? 0 : Math.sin(t * 1.15 + cell.seed * 0.09) * 0.05
+      const height = 0.05 + falloff * falloff * 0.72 + wave
+
+      dummy.position.set(cell.x, height / 2, cell.z)
+      dummy.scale.set(0.2, Math.max(0.04, height), 0.2)
+      dummy.rotation.set(0, 0, 0)
       dummy.updateMatrix()
-      m.setMatrixAt(i, dummy.matrix)
+      inst.setMatrixAt(i, dummy.matrix)
 
-      tmp.copy(colorA).lerp(colorB, Math.min(1, Math.abs(wave) * 0.32 + pulse * 0.9))
-      m.setColorAt(i, tmp)
-    }
+      color.set(PALETTE.surfaceLight).lerp(new THREE.Color(PALETTE.accent), Math.min(1, falloff * 1.3))
+      inst.setColorAt(i, color)
+    })
 
-    m.instanceMatrix.needsUpdate = true
-    if (m.instanceColor) m.instanceColor.needsUpdate = true
+    inst.instanceMatrix.needsUpdate = true
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true
   })
 
   return (
     <>
-      <fog attach="fog" args={[PALETTE.fog, 4.5, 13]} />
-      <Rig intensity={0.9} />
+      <fog attach="fog" args={[PALETTE.fog, 5, 14]} />
+      <Rig intensity={0.8} />
 
-      <group rotation={[0, Math.PI / 4, 0]} position={[0, -0.6, 0]}>
-        <mesh
-          rotation={[-Math.PI / 2, 0, 0]}
-          scale={18}
-          visible={false}
-          onPointerMove={(e) => {
-            pointer.current.set(e.point.x, 0, e.point.z)
-            strength.current = 1
-          }}
-          onPointerLeave={() => {
-            strength.current = 0
-          }}
-        >
-          <planeGeometry />
-          <meshBasicMaterial transparent opacity={0} />
-        </mesh>
-
-        <instancedMesh ref={mesh} args={[undefined, undefined, TOTAL]}>
+      <group rotation={[0.32, 0.5, 0]} position={[0, -0.55, 0]}>
+        <instancedMesh ref={mesh} args={[undefined, undefined, cells.length]}>
           <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial
-            metalness={0.7}
-            roughness={0.38}
-            emissive={PALETTE.accentDim}
-            emissiveIntensity={0.16}
-          />
+          <meshStandardMaterial metalness={0.68} roughness={0.36} flatShading toneMapped={false} />
         </instancedMesh>
 
-        <gridHelper args={[6, 22, PALETTE.edge, PALETTE.edge]} position={[0, -0.01, 0]} />
+        <gridHelper args={[COLS * GAP, COLS, PALETTE.edge, '#161c24']} position={[0, 0.001, 0]} />
       </group>
     </>
   )
