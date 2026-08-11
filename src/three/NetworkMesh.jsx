@@ -2,22 +2,22 @@ import { useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import Rig from './Rig'
-import { PALETTE, damp } from './palette'
+import Motes from './Motes'
+import { damp, LOW_END, PALETTE } from './palette'
 
-const NODE_COUNT = 30
-const LINK_DISTANCE = 2.15
+const NODE_COUNT = LOW_END ? 20 : 30
+const LINK_DISTANCE = 2.2
 
 function buildGraph() {
   const nodes = []
-  // distribusi fibonacci sphere -> sebaran rapi, bukan acak menggerombol
   const golden = Math.PI * (3 - Math.sqrt(5))
   for (let i = 0; i < NODE_COUNT; i++) {
     const y = 1 - (i / (NODE_COUNT - 1)) * 2
     const r = Math.sqrt(Math.max(0, 1 - y * y))
     const theta = golden * i
-    const radius = 2.35 + ((i * 37) % 11) / 40
+    const radius = 2.3 + ((i * 37) % 11) / 42
     nodes.push({
-      base: new THREE.Vector3(Math.cos(theta) * r * radius, y * 1.85, Math.sin(theta) * r * radius),
+      base: new THREE.Vector3(Math.cos(theta) * r * radius, y * 1.8, Math.sin(theta) * r * radius),
       current: new THREE.Vector3(),
       tier: i % 3
     })
@@ -33,10 +33,7 @@ function buildGraph() {
   return { nodes, links }
 }
 
-/**
- * Scene jaringan: node polygon + link.
- * Node menjauh dari pointer (repel), hover node menyorot semua link miliknya.
- */
+/** Node polygon menjauh dari pointer; hover satu node menyalakan seluruh link miliknya. */
 export default function NetworkMesh() {
   const { nodes, links } = useMemo(buildGraph, [])
   const [hovered, setHovered] = useState(null)
@@ -54,28 +51,21 @@ export default function NetworkMesh() {
   }, [links.length])
 
   const colors = useMemo(
-    () => ({
-      idle: new THREE.Color(PALETTE.edge),
-      hot: new THREE.Color(PALETTE.accent)
-    }),
+    () => ({ idle: new THREE.Color(PALETTE.edge), hot: new THREE.Color(PALETTE.accent) }),
     []
   )
 
   useFrame((three, dt) => {
     const step = Math.min(dt, 0.05)
     const t = three.clock.elapsedTime
-
-    if (spinner.current) spinner.current.rotation.y += step * 0.075
+    if (spinner.current) spinner.current.rotation.y += step * 0.08
 
     const p = pointer.current
 
     nodes.forEach((node, i) => {
       const target = node.current
-      const drift = Math.sin(t * 0.7 + i) * 0.05
-
-      // gaya tolak dari pointer
       let px = node.base.x
-      let py = node.base.y + drift
+      let py = node.base.y + Math.sin(t * 0.7 + i) * 0.05
       let pz = node.base.z
 
       if (active.current) {
@@ -100,7 +90,7 @@ export default function NetworkMesh() {
         m.position.copy(target)
         m.rotation.x += step * 0.4
         m.rotation.y += step * 0.55
-        const scale = (hovered === i ? 1.75 : 1) * (0.09 + node.tier * 0.022)
+        const scale = (hovered === i ? 1.8 : 1) * (0.09 + node.tier * 0.022)
         m.scale.setScalar(damp(m.scale.x || scale, scale, 8, step))
       }
     })
@@ -118,14 +108,12 @@ export default function NetworkMesh() {
       pos.array[ix + 4] = B.y
       pos.array[ix + 5] = B.z
 
-      const lit = hovered === a || hovered === b
-      const c = lit ? colors.hot : colors.idle
-      col.array[ix] = c.r
-      col.array[ix + 1] = c.g
-      col.array[ix + 2] = c.b
-      col.array[ix + 3] = c.r
-      col.array[ix + 4] = c.g
-      col.array[ix + 5] = c.b
+      const c = hovered === a || hovered === b ? colors.hot : colors.idle
+      for (let o = 0; o < 6; o += 3) {
+        col.array[ix + o] = c.r
+        col.array[ix + o + 1] = c.g
+        col.array[ix + o + 2] = c.b
+      }
     })
     pos.needsUpdate = true
     col.needsUpdate = true
@@ -135,10 +123,9 @@ export default function NetworkMesh() {
     <>
       <fog attach="fog" args={[PALETTE.fog, 6, 18]} />
       <Rig intensity={0.95} />
+      <Motes count={LOW_END ? 60 : 140} radius={9} />
 
-      {/* bidang tak terlihat untuk membaca posisi pointer di ruang 3D */}
       <mesh
-        position={[0, 0, 0]}
         scale={26}
         visible={false}
         onPointerMove={(e) => {
@@ -155,7 +142,7 @@ export default function NetworkMesh() {
 
       <group ref={spinner}>
         <lineSegments geometry={lineGeometry}>
-          <lineBasicMaterial vertexColors transparent opacity={0.55} />
+          <lineBasicMaterial vertexColors transparent opacity={0.5} />
         </lineSegments>
 
         {nodes.map((node, i) => (
@@ -174,7 +161,7 @@ export default function NetworkMesh() {
             <meshStandardMaterial
               color={hovered === i ? PALETTE.accent : PALETTE.surfaceLight}
               emissive={hovered === i ? PALETTE.accent : PALETTE.accentDim}
-              emissiveIntensity={hovered === i ? 1.1 : 0.3}
+              emissiveIntensity={hovered === i ? 1.1 : 0.28}
               metalness={0.6}
               roughness={0.35}
               flatShading

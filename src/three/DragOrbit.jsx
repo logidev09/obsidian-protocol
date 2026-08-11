@@ -1,119 +1,93 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { damp, clamp, PREFERS_REDUCED } from './palette'
+import { clamp, damp, PREFERS_REDUCED } from './palette'
 
 /**
- * Rotasi objek via drag pointer + inersia + auto-spin saat idle.
- * Sengaja TIDAK memakai OrbitControls: wheel/scroll harus tetap milik halaman,
- * jadi canvas tidak pernah "menelan" scroll user.
+ * Rotasi objek pakai drag mouse/touch + inersia, dan tilt halus mengikuti pointer.
+ * touch-action: pan-y di CSS bikin scroll vertikal tetap lolos ke halaman,
+ * jadi di HP orang tidak "terjebak" di dalam canvas.
  */
 export default function DragOrbit({
   children,
-  autoSpin = 0.12,
-  damping = 4.2,
-  maxPitch = 0.6,
-  sensitivity = 0.0072,
-  followPointer = 0.22
+  autoSpin = 0.14,
+  maxPitch = 0.62,
+  sensitivity = 0.0062
 }) {
   const group = useRef(null)
-  const state = useRef({
-    dragging: false,
-    lastX: 0,
-    lastY: 0,
-    velX: 0,
-    velY: 0,
-    yaw: 0,
-    pitch: 0,
-    targetYaw: 0,
-    targetPitch: 0
-  })
-
+  const s = useRef({ dragging: false, lastX: 0, lastY: 0, velX: 0, velY: 0, yaw: 0, pitch: 0 })
   const { gl } = useThree()
-  const dom = gl.domElement
 
-  const handlers = useMemo(() => {
-    const s = state.current
+  useEffect(() => {
+    const el = gl.domElement
+    const st = s.current
+    el.style.cursor = 'grab'
+    el.style.touchAction = 'pan-y'
 
     const down = (e) => {
-      s.dragging = true
-      s.lastX = e.clientX
-      s.lastY = e.clientY
-      s.velX = 0
-      s.velY = 0
-      dom.style.cursor = 'grabbing'
+      st.dragging = true
+      st.lastX = e.clientX
+      st.lastY = e.clientY
+      st.velX = 0
+      st.velY = 0
+      el.style.cursor = 'grabbing'
+      if (el.setPointerCapture) el.setPointerCapture(e.pointerId)
     }
-
     const move = (e) => {
-      if (!s.dragging) return
-      const dx = e.clientX - s.lastX
-      const dy = e.clientY - s.lastY
-      s.lastX = e.clientX
-      s.lastY = e.clientY
-      s.targetYaw += dx * sensitivity
-      s.targetPitch = clamp(s.targetPitch + dy * sensitivity, -maxPitch, maxPitch)
-      s.velX = dx * sensitivity
-      s.velY = dy * sensitivity
+      if (!st.dragging) return
+      const dx = e.clientX - st.lastX
+      const dy = e.clientY - st.lastY
+      st.lastX = e.clientX
+      st.lastY = e.clientY
+      st.yaw += dx * sensitivity
+      st.pitch = clamp(st.pitch + dy * sensitivity, -maxPitch, maxPitch)
+      st.velX = dx * sensitivity
+      st.velY = dy * sensitivity
     }
-
-    const up = () => {
-      s.dragging = false
-      dom.style.cursor = 'grab'
-    }
-
-    return {
-      onPointerDown: down,
-      onPointerMove: move,
-      onPointerUp: up,
-      onPointerLeave: up,
-      onPointerCancel: up,
-      onPointerOver: () => {
-        if (!s.dragging) dom.style.cursor = 'grab'
-      },
-      onPointerOut: () => {
-        if (!s.dragging) dom.style.cursor = 'auto'
+    const up = (e) => {
+      st.dragging = false
+      el.style.cursor = 'grab'
+      if (el.releasePointerCapture && e.pointerId != null) {
+        try {
+          el.releasePointerCapture(e.pointerId)
+        } catch (err) {
+          /* pointer sudah dilepas browser */
+        }
       }
     }
-  }, [dom, maxPitch, sensitivity])
+
+    el.addEventListener('pointerdown', down)
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+    el.addEventListener('pointercancel', up)
+    el.addEventListener('pointerleave', up)
+    return () => {
+      el.removeEventListener('pointerdown', down)
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+      el.removeEventListener('pointercancel', up)
+      el.removeEventListener('pointerleave', up)
+    }
+  }, [gl, sensitivity, maxPitch])
 
   useFrame((three, dt) => {
-    const s = state.current
     const g = group.current
     if (!g) return
-
+    const st = s.current
     const step = Math.min(dt, 0.05)
 
-    if (!s.dragging) {
-      s.targetYaw += s.velX
-      s.targetPitch = clamp(s.targetPitch + s.velY, -maxPitch, maxPitch)
-      s.velX *= 0.92
-      s.velY *= 0.92
-
-      if (!PREFERS_REDUCED) s.targetYaw += autoSpin * step
-
-      // parallax halus mengikuti pointer walau tidak sedang drag
-      s.targetPitch = clamp(
-        s.targetPitch + (-three.pointer.y * followPointer - s.targetPitch) * 0.02,
-        -maxPitch,
-        maxPitch
-      )
-      s.targetYaw += three.pointer.x * followPointer * 0.012
+    if (!st.dragging) {
+      st.yaw += st.velX
+      st.pitch = clamp(st.pitch + st.velY, -maxPitch, maxPitch)
+      st.velX *= 0.93
+      st.velY *= 0.93
+      if (!PREFERS_REDUCED) st.yaw += autoSpin * step
+      st.pitch = damp(st.pitch, three.pointer.y * 0.16, 2.2, step)
     }
 
-    s.yaw = damp(s.yaw, s.targetYaw, damping, step)
-    s.pitch = damp(s.pitch, s.targetPitch, damping, step)
-
-    g.rotation.y = s.yaw
-    g.rotation.x = s.pitch
+    g.rotation.y = damp(g.rotation.y, st.yaw, 9, step)
+    g.rotation.x = damp(g.rotation.x, st.pitch, 9, step)
+    g.position.x = damp(g.position.x, three.pointer.x * 0.12, 2, step)
   })
 
-  return (
-    <group {...handlers}>
-      {/* backdrop penangkap pointer, ditaruh di belakang semua objek */}
-      <mesh position={[0, 0, -7]} scale={44} visible={false}>
-        <planeGeometry />
-        <meshBasicMaterial transparent opacity={0} />
-      </mesh>
-      <group ref={group}>{children}</group>
-    </group>
-  )
+  return <group ref={group}>{children}</group>
 }

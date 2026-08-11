@@ -2,17 +2,14 @@ import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import Rig from './Rig'
-import { PALETTE, PREFERS_REDUCED } from './palette'
+import { LOW_END, PALETTE, PREFERS_REDUCED } from './palette'
 
-const COLS = 22
-const ROWS = 22
+const COLS = LOW_END ? 16 : 22
+const ROWS = LOW_END ? 16 : 22
 const GAP = 0.26
 const TOTAL = COLS * ROWS
 
-/**
- * Scene settlement: grid batang instanced.
- * Tinggi tiap batang bereaksi ke jarak pointer + gelombang halus.
- */
+/** Grid batang instanced: tinggi & warnanya bereaksi ke jarak pointer. */
 export default function LedgerGrid() {
   const mesh = useRef(null)
   const pointer = useRef(new THREE.Vector3(99, 0, 99))
@@ -27,11 +24,7 @@ export default function LedgerGrid() {
     const list = []
     for (let x = 0; x < COLS; x++) {
       for (let z = 0; z < ROWS; z++) {
-        list.push({
-          x: (x - (COLS - 1) / 2) * GAP,
-          z: (z - (ROWS - 1) / 2) * GAP,
-          seed: (x * 13 + z * 7) % 17
-        })
+        list.push({ x: (x - (COLS - 1) / 2) * GAP, z: (z - (ROWS - 1) / 2) * GAP })
       }
     }
     return list
@@ -43,14 +36,14 @@ export default function LedgerGrid() {
 
     const t = PREFERS_REDUCED ? 0 : three.clock.elapsedTime
     const p = pointer.current
-    strength.current += (0 - strength.current) * dt * 0.6
+    strength.current += (0 - strength.current) * dt * 0.55
 
     for (let i = 0; i < TOTAL; i++) {
       const c = cells[i]
       const wave = Math.sin(c.x * 1.6 + t * 0.9) * Math.cos(c.z * 1.4 - t * 0.7)
       const dist = Math.hypot(c.x - p.x, c.z - p.z)
       const pulse = Math.max(0, 1 - dist / 1.9) * strength.current
-      const height = 0.14 + Math.abs(wave) * 0.32 + pulse * 1.5
+      const height = 0.14 + Math.abs(wave) * 0.32 + pulse * 1.45
 
       dummy.position.set(c.x, height / 2, c.z)
       dummy.scale.set(0.16, height, 0.16)
@@ -58,8 +51,7 @@ export default function LedgerGrid() {
       dummy.updateMatrix()
       m.setMatrixAt(i, dummy.matrix)
 
-      const mix = Math.min(1, Math.abs(wave) * 0.35 + pulse * 0.9)
-      tmp.copy(colorA).lerp(colorB, mix)
+      tmp.copy(colorA).lerp(colorB, Math.min(1, Math.abs(wave) * 0.32 + pulse * 0.9))
       m.setColorAt(i, tmp)
     }
 

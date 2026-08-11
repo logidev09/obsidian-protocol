@@ -1,30 +1,26 @@
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { PALETTE, PREFERS_REDUCED } from './palette'
+import { LOW_END, PALETTE, PREFERS_REDUCED } from './palette'
 
-/** Partikel debu halus — memberi kedalaman tanpa membebani GPU. */
-export default function Motes({ count = 260, radius = 9, color = PALETTE.accent, size = 0.032 }) {
+/** Debu volumetrik tipis — memberi kedalaman tanpa membebani GPU. */
+export default function Motes({ count = LOW_END ? 90 : 220, radius = 7, size = 0.035 }) {
   const points = useRef(null)
 
   const positions = useMemo(() => {
     const arr = new Float32Array(count * 3)
     for (let i = 0; i < count; i++) {
-      const r = radius * (0.35 + Math.random() * 0.65)
-      const theta = Math.random() * Math.PI * 2
-      const phi = Math.acos(2 * Math.random() - 1)
-      arr[i * 3] = r * Math.sin(phi) * Math.cos(theta)
-      arr[i * 3 + 1] = r * Math.cos(phi) * 0.55
-      arr[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta)
+      arr[i * 3] = (Math.random() - 0.5) * radius * 2
+      arr[i * 3 + 1] = (Math.random() - 0.5) * radius
+      arr[i * 3 + 2] = (Math.random() - 0.5) * radius * 1.4
     }
     return arr
   }, [count, radius])
 
-  useFrame((state) => {
+  useFrame((three, dt) => {
     if (!points.current || PREFERS_REDUCED) return
-    const t = state.clock.elapsedTime
-    points.current.rotation.y = t * 0.026
-    points.current.rotation.x = Math.sin(t * 0.11) * 0.055
+    points.current.rotation.y += dt * 0.02
+    points.current.position.y = Math.sin(three.clock.elapsedTime * 0.25) * 0.14
   })
 
   return (
@@ -34,9 +30,9 @@ export default function Motes({ count = 260, radius = 9, color = PALETTE.accent,
       </bufferGeometry>
       <pointsMaterial
         size={size}
-        color={color}
+        color={PALETTE.edge}
         transparent
-        opacity={0.42}
+        opacity={0.55}
         sizeAttenuation
         depthWrite={false}
         blending={THREE.AdditiveBlending}
