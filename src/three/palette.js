@@ -4,7 +4,7 @@ export const PALETTE = {
   fog: '#0a0d12',
   surface: '#141a22',
   surfaceLight: '#1d2530',
-  edge: '#39milestone',
+  edge: '#3a4655',
   accent: '#4fd1c5',
   accentDim: '#2f7d77',
   amber: '#d9a066',
@@ -12,16 +12,12 @@ export const PALETTE = {
   text: '#e7ebf0'
 }
 
-// Warna edge dipisah supaya tidak tertukar dengan surface.
-PALETTE.edge = '#3a4655'
-
 export const LOW_END =
-  typeof navigator !== 'undefined' &&
-  (navigator.hardwareConcurrency || 8) <= 4
+  typeof navigator !== 'undefined' && (navigator.hardwareConcurrency || 8) <= 4
 
 export const PREFERS_REDUCED =
   typeof window !== 'undefined' &&
-  window.matchMedia &&
+  typeof window.matchMedia === 'function' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 export const DPR = LOW_END ? [1, 1.35] : [1, 1.9]
